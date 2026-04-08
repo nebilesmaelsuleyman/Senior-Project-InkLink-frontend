@@ -1,9 +1,10 @@
 'use client'
 
-import { use, useState, useEffect, useRef, useCallback } from 'react'
+import { use, useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Heart, MessageCircle, ChevronLeft, ChevronRight, Gift, Moon, Sun, Lock, Crown, ShoppingCart, Loader2 } from 'lucide-react'
+import { ArrowLeft, Heart, MessageCircle, ChevronLeft, ChevronRight, Gift, Moon, Sun, Lock, Crown, ShoppingCart, Loader2, Volume2, VolumeX, RotateCcw } from 'lucide-react'
+import { ttsService } from '@/app/services/tts.service'
 import { useTheme } from 'next-themes'
 import { ReactionsService } from '@/app/services/reactions.service'
 import { RatingsService, RatingResponse } from '@/app/services/ratings.service'
@@ -41,9 +42,31 @@ export default function ChapterReadingPage({ params }: { params: Promise<{ id: s
   // ─── Read Tracking ──────────────────────────────────────────────────
   const articleRef = useRef<HTMLDivElement>(null)
   const hasLoggedRead = useRef(false)
+  
+  // ─── TTS State ──────────────────────────────────────────────────────
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [ttsLoading, setTtsLoading] = useState(false)
+  const [audioReady, setAudioReady] = useState(false)  // true once synthesis is done
+  const [playbackSpeed, setPlaybackSpeed] = useState(1)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const audioUrlRef = useRef<string | null>(null)
 
   useEffect(() => {
     setMounted(true)
+
+    // Stop TTS on chapter change — but don't revoke cached blob URLs
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    // Only revoke if NOT in the cache (keep cached audio alive)
+    if (audioUrlRef.current) {
+      ttsService.revokeUrl(audioUrlRef.current, { skipIfCached: true });
+      audioUrlRef.current = null;
+    }
+    setIsPlaying(false);
+    setAudioReady(false);
+
     const fetchData = async () => {
       try {
         const { EditorWorksService } = await import('@/app/services/editor-works.service');
@@ -175,6 +198,126 @@ export default function ChapterReadingPage({ params }: { params: Promise<{ id: s
     }
   }
 
+  // ─── TTS Handler ────────────────────────────────────────────────────
+  const handleTts = async () => {
+    // ── PAUSE: currently playing → pause at current position
+    if (isPlaying && audioRef.current) {
+      audioRef.current.pause()
+      setIsPlaying(false)
+      return
+    }
+
+    // ── RESUME: audio loaded and paused → continue from same position
+    if (audioRef.current && !audioRef.current.ended && !isPlaying) {
+      try {
+        await audioRef.current.play()
+        setIsPlaying(true)
+      } catch (err) {
+        console.error('Resume failed:', err)
+      }
+      return
+    }
+
+    // ── RESTART from end: audio finished → restart without re-synthesizing
+    if (audioRef.current && audioRef.current.ended) {
+      audioRef.current.currentTime = 0
+      try {
+        await audioRef.current.play()
+        setIsPlaying(true)
+      } catch (err) {
+        console.error('Restart-from-end failed:', err)
+      }
+      return
+    }
+
+    // ── SYNTHESIZE OR LOAD FROM CACHE
+    if (!chapter?.contentText) {
+      toast.error('No content to read')
+      return
+    }
+
+    // Clean up any previous audio
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current = null
+    }
+    if (audioUrlRef.current) {
+      ttsService.revokeUrl(audioUrlRef.current)
+      audioUrlRef.current = null
+    }
+
+    setTtsLoading(true)
+    const isCached = ttsService.isCached(chapterId)
+    if (!isCached) {
+      toast.info('Preparing audio…', { id: 'tts-loading', duration: 60_000 })
+    }
+
+    try {
+      // Detect Amharic characters (U+1200–U+137F)
+      const isAmharic = /[\u1200-\u137F]/.test(chapter.contentText)
+      const lang = isAmharic ? 'am' : 'en'
+
+      // Pass chapterId as cache key — returns cached URL instantly on repeat listens
+      const blobUrl = await ttsService.synthesize(chapter.contentText, lang, chapterId)
+      audioUrlRef.current = blobUrl
+
+      const audio = new Audio(blobUrl)
+      audio.playbackRate = playbackSpeed
+      audioRef.current = audio
+
+      audio.onended = () => setIsPlaying(false)
+      audio.onerror = () => {
+        setIsPlaying(false)
+        toast.error('Audio playback error')
+      }
+
+      toast.dismiss('tts-loading')
+      await audio.play()
+      setIsPlaying(true)
+      setAudioReady(true)
+    } catch (err: any) {
+      console.error('TTS failed:', err)
+      toast.dismiss('tts-loading')
+      toast.error('Failed to generate audio. Check your connection.')
+    } finally {
+      setTtsLoading(false)
+    }
+  }
+
+  // ── Restart from the beginning (re-uses already-downloaded audio)
+  const handleRestart = async () => {
+    if (!audioRef.current) return
+    audioRef.current.currentTime = 0
+    try {
+      await audioRef.current.play()
+      setIsPlaying(true)
+    } catch (err) {
+      console.error('Restart failed:', err)
+    }
+  }
+
+  // ── Sync playback speed in real time
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.playbackRate = playbackSpeed
+    }
+  }, [playbackSpeed])
+
+  // ── Stop and free audio element on unmount (do NOT revoke cached blob URLs)
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current = null
+      }
+      if (audioUrlRef.current) {
+        // skipIfCached: true → cached chapters keep their blob URL alive
+        ttsService.revokeUrl(audioUrlRef.current, { skipIfCached: true })
+        audioUrlRef.current = null
+      }
+    }
+  }, [])
+
   // ─── Purchase Handler ───────────────────────────────────────────────
   const handlePurchase = async () => {
     if (!user) {
@@ -266,6 +409,48 @@ export default function ChapterReadingPage({ params }: { params: Promise<{ id: s
               <ArrowLeft size={20} />
               <span className="hidden sm:inline text-sm font-medium">Back</span>
             </Link>
+            {!isLocked && (
+              <button
+                onClick={handleTts}
+                disabled={ttsLoading}
+                className={`p-2 rounded-lg transition-all flex items-center gap-2 ${
+                  isPlaying 
+                    ? 'bg-primary text-primary-foreground shadow-sm' 
+                    : 'hover:bg-secondary text-foreground'
+                }`}
+                title={isPlaying ? "Pause reading" : "Read aloud"}
+              >
+                {ttsLoading ? (
+                  <Loader2 size={20} className="animate-spin" />
+                ) : isPlaying ? (
+                  <VolumeX size={20} />
+                ) : (
+                  <Volume2 size={20} />
+                )}
+                <span className="hidden md:inline text-sm font-medium">
+                  {isPlaying ? "Reading..." : "Read Aloud"}
+                </span>
+              </button>
+            )}
+            {/* Speed + Restart buttons — visible whenever audio is ready */}
+            {audioReady && !ttsLoading && (
+              <>
+                <button
+                  onClick={() => setPlaybackSpeed(prev => prev >= 2 ? 0.75 : Math.round((prev + 0.25) * 100) / 100)}
+                  className="px-2 py-1 hover:bg-secondary rounded-md transition-colors text-[10px] font-black border border-border/50 shadow-sm"
+                  title="Change playback speed"
+                >
+                  {playbackSpeed % 1 === 0 ? playbackSpeed : playbackSpeed.toFixed(2)}x
+                </button>
+                <button
+                  onClick={handleRestart}
+                  className="p-1.5 hover:bg-secondary rounded-md transition-colors text-muted-foreground hover:text-foreground"
+                  title="Restart from beginning"
+                >
+                  <RotateCcw size={15} />
+                </button>
+              </>
+            )}
           </div>
             <h1 className="text-lg font-bold text-center flex-1 line-clamp-1 px-4">{work?.title || 'Loading...'}</h1>
             <div className="flex items-center gap-2">
