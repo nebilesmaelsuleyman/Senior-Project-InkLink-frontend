@@ -40,7 +40,15 @@ export default function HomePage() {
       ])
 
       if (lib?.currentlyReading) {
-        setContinueReading(lib.currentlyReading.slice(0, 4).map((item: any) => ({
+        const uniqueReads = new Map();
+        for (const item of lib.currentlyReading) {
+          const wId = item.workId?._id || item.workId;
+          if (!uniqueReads.has(wId)) {
+            uniqueReads.set(wId, item);
+          }
+        }
+        
+        setContinueReading(Array.from(uniqueReads.values()).slice(0, 4).map((item: any) => ({
           id: item.workId?._id || item.workId,
           title: item.workId?.title || 'Unknown',
           author: item.workId?.authorId?.username || 'Author',

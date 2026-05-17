@@ -253,12 +253,15 @@ export default function ChapterReadingPage({ params }: { params: Promise<{ id: s
     }
 
     try {
+      // Strip HTML tags for TTS so it doesn't read markup out loud
+      const plainText = chapter.contentText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+
       // Detect Amharic characters (U+1200–U+137F)
-      const isAmharic = /[\u1200-\u137F]/.test(chapter.contentText)
+      const isAmharic = /[\u1200-\u137F]/.test(plainText)
       const lang = isAmharic ? 'am' : 'en'
 
       // Pass chapterId as cache key — returns cached URL instantly on repeat listens
-      const blobUrl = await ttsService.synthesize(chapter.contentText, lang, chapterId)
+      const blobUrl = await ttsService.synthesize(plainText, lang, chapterId)
       audioUrlRef.current = blobUrl
 
       const audio = new Audio(blobUrl)
@@ -500,11 +503,12 @@ export default function ChapterReadingPage({ params }: { params: Promise<{ id: s
             <div className="relative overflow-hidden rounded-2xl">
               <article className="prose prose-invert max-w-none opacity-30 blur-sm select-none pointer-events-none" style={{ maxHeight: '300px', overflow: 'hidden' }}>
                 <div className="space-y-6 text-foreground leading-relaxed">
-                  {chapter.contentText ? chapter.contentText.split('\n\n').slice(0, 3).map((paragraph: string, index: number) => (
-                    <p key={index} className="text-base sm:text-lg">
-                      {paragraph}
-                    </p>
-                  )) : <p className="italic opacity-50">Premium content.</p>}
+                  {chapter.contentText ? (
+                    <div 
+                      className="text-base sm:text-lg"
+                      dangerouslySetInnerHTML={{ __html: chapter.contentText }}
+                    />
+                  ) : <p className="italic opacity-50">Premium content.</p>}
                 </div>
               </article>
               <div className="absolute inset-0 bg-gradient-to-b from-transparent via-background/60 to-background" />
@@ -561,13 +565,10 @@ export default function ChapterReadingPage({ params }: { params: Promise<{ id: s
           <>
             {/* Chapter Content */}
             <article ref={articleRef} className="prose prose-invert max-w-none mb-12">
-              <div className="space-y-6 text-foreground leading-relaxed">
-                {chapter.contentText ? chapter.contentText.split('\n\n').map((paragraph: string, index: number) => (
-                  <p key={index} className="text-base sm:text-lg">
-                    {paragraph}
-                  </p>
-                )) : <p className="italic opacity-50">No content available.</p>}
-              </div>
+              <div 
+                className="space-y-6 text-foreground leading-relaxed content-html-wrapper"
+                dangerouslySetInnerHTML={{ __html: chapter.contentText || '<p class="italic opacity-50">No content available.</p>' }}
+              />
             </article>
 
             {/* Interaction Buttons */}
