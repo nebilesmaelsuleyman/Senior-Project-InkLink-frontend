@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Eye, Search, Trash2 } from 'lucide-react'
+import { ArrowLeft, Eye, Search, Trash2, X } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { AdminDashboardService, type AdminContentDto } from '@/app/services/admin-dashboard.service'
 import { useAuthStore } from '@/app/store/authstore'
@@ -233,8 +233,14 @@ export default function AdminContentPage() {
 
       {/* Modal Overlay */}
       {selectedChapter && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-300">
-          <div className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-[2.5rem] bg-white shadow-2xl dark:bg-neutral-900 animate-in zoom-in-95 duration-300">
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-300"
+          onClick={() => setSelectedChapter(null)}
+        >
+          <div 
+            className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-[2.5rem] bg-white shadow-2xl dark:bg-neutral-900 animate-in zoom-in-95 duration-300"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-start justify-between border-b border-neutral-100 px-8 py-8 dark:border-neutral-800">
               <div className="space-y-1">
                 <h2 className="text-3xl font-black tracking-tight text-neutral-900 dark:text-white">{selectedChapter.title}</h2>
@@ -248,7 +254,7 @@ export default function AdminContentPage() {
                 onClick={() => setSelectedChapter(null)}
                 className="rounded-2xl bg-neutral-100 p-3 text-neutral-500 transition-all hover:bg-neutral-200 hover:text-neutral-900 dark:bg-neutral-800 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-white"
               >
-                <Trash2 className="h-6 w-6 rotate-45" />
+                <X className="h-6 w-6" />
               </button>
             </div>
             <div className="max-h-[calc(90vh-140px)] overflow-y-auto px-10 py-10">
